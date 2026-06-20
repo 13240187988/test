@@ -36,8 +36,7 @@ def init_state():
         st.session_state.records = []
         st.session_state.game_over = False
         st.session_state.show_balloons = False
-        # 用于存储历史价格，供图表显示
-        st.session_state.historical_prices = []
+        st.session_state.early_settle = False  # 是否提前结算
 
 
 def get_current_data(df):
@@ -63,6 +62,7 @@ def generate_comment(action, next_row):
         return "🎉 模拟结束！"
     change = next_row['涨跌幅%']
     month = next_row['交易时间'].strftime('%Y年%m月')
+
     if action == "持有":
         if change > 0:
             msgs = [f"🎯 明智之举！{month}上涨{change:.2f}%，朋友们都羡慕你！",
@@ -73,6 +73,7 @@ def generate_comment(action, next_row):
                     f"🤔 市场无情！{month}下跌{change:.2f}%，机会在下跌中孕育！",
                     f"📉 暂时回调！{month}跌了{change:.2f}%，黎明在前方！",
                     f"💪 风雨过后见彩虹！{month}跌了{change:.2f}%，勇气可嘉！"]
+
     elif action == "卖出":
         if change > 0:
             msgs = [f"😱 卖飞了！{month}大涨{change:.2f}%，朋友们笑你太急！",
@@ -82,7 +83,8 @@ def generate_comment(action, next_row):
         else:
             msgs = [f"🛡️ 避险成功！{month}大跌{change:.2f}%，躲过一劫！", f"🧠 高手风范！{month}跌了{change:.2f}%，空仓明智！",
                     f"💡 未雨绸缪！{month}下跌{change:.2f}%，判断精准！", f"🌟 大师级别！{month}跌了{change:.2f}%，满分操作！"]
-    else:
+
+    elif action == "买入":
         if change > 0:
             msgs = [f"🚀 抄底成功！{month}大涨{change:.2f}%，精准入场！", f"💰 眼光独到！{month}涨了{change:.2f}%，低位建仓！",
                     f"🎯 完美时机！{month}上涨{change:.2f}%，高手！"]
@@ -90,6 +92,19 @@ def generate_comment(action, next_row):
             msgs = [f"😅 买早了！{month}跌了{change:.2f}%，但机会是等出来的！",
                     f"📉 暂时被套！{month}下跌{change:.2f}%，坚守价值！",
                     f"💪 逆向投资！{month}跌了{change:.2f}%，你是勇敢者！"]
+
+    else:  # 空仓观望
+        if change > 0:
+            msgs = [f"😭 踏空了！{month}大涨{change:.2f}%，你在场外观望！",
+                    f"🤔 太保守了！{month}涨了{change:.2f}%，错过一波行情！",
+                    f"😅 看着别人赚钱！{month}上涨{change:.2f}%，你选择了观望！",
+                    f"💔 遗憾！{month}涨{change:.2f}%，空仓的代价！"]
+        else:
+            msgs = [f"🛡️ 完美避险！{month}大跌{change:.2f}%，空仓让你躲过一劫！",
+                    f"🧠 大师风范！{month}跌了{change:.2f}%，耐心等待是美德！",
+                    f"💡 明智之选！{month}下跌{change:.2f}%，现金为王！",
+                    f"🌟 防守大师！{month}跌了{change:.2f}%，你保住了本金！"]
+
     return random.choice(msgs)
 
 
@@ -100,6 +115,7 @@ def handle_action(action, df):
     price = current['收盘价']
     change = current['涨跌幅%']
     month = current['交易时间'].strftime('%Y-%m')
+
     if action == "持有":
         pass
     elif action == "卖出":
@@ -111,6 +127,9 @@ def handle_action(action, df):
         st.session_state.buy_price = price
         st.session_state.cash = 0
         st.session_state.holdings = True
+    elif action == "空仓观望":
+        pass
+
     next_row = get_next_data(df)
     comment = generate_comment(action, next_row)
     st.session_state.records.append({'月份': month, '收盘价': price, '涨跌幅': change, '操作': action, '评价': comment})
@@ -118,6 +137,30 @@ def handle_action(action, df):
     if st.session_state.step >= len(df):
         st.session_state.game_over = True
         st.session_state.show_balloons = True
+
+
+def early_settle(df):
+    """提前结算：按当前价格清仓，结束游戏"""
+    current = get_current_data(df)
+    if current is not None:
+        price = current['收盘价']
+        # 如果持有股票，先清仓
+        if st.session_state.holdings:
+            st.session_state.cash = st.session_state.shares * price
+            st.session_state.shares = 0
+            st.session_state.holdings = False
+        st.session_state.game_over = True
+        st.session_state.show_balloons = True
+        st.session_state.early_settle = True
+
+        # 添加一条结算记录
+        st.session_state.records.append({
+            '月份': current['交易时间'].strftime('%Y-%m'),
+            '收盘价': price,
+            '涨跌幅': current['涨跌幅%'],
+            '操作': '💼 提前结算',
+            '评价': f"📊 在第 {st.session_state.step + 1} 个月选择落袋为安！"
+        })
 
 
 def reset_game():
@@ -129,18 +172,36 @@ def reset_game():
     st.session_state.records = []
     st.session_state.game_over = False
     st.session_state.show_balloons = False
+    st.session_state.early_settle = False
+
+
+def get_final_comment(final_rate):
+    if final_rate > 50:
+        return "🏆 也就那样吧，赶上了风口而已！"
+    elif final_rate > 30:
+        return "🌟 优秀！投资眼光不错！"
+    elif final_rate > 10:
+        return "👍 稳健，但是你没抓住这波机会，您身边朋友都资产翻倍了！"
+    elif final_rate > 0:
+        return "📈 不是，这牛市，你才赚这么点？存银行去吧"
+    elif final_rate > -10:
+        return "😅 谁让你不止损的，哈哈哈"
+    elif final_rate > -30:
+        return "😰 完蛋了吧，让你不见好就收"
+    else:
+        return "💀 看你怎么和家人交代！！"
 
 
 def main():
     init_state()
     df = load_data()
     st.title("📈 上证指数月线模拟交易")
-    st.markdown("从2007年1月到2009年5月，共29个月，根据每月行情决定买入/持有/卖出")
+    st.markdown("从2007年1月到2009年5月，共29个月，根据每月行情决定买入/持有/卖出/空仓")
 
     with st.sidebar:
         st.header("📊 账户信息")
         current = get_current_data(df)
-        if current is not None:
+        if current is not None and not st.session_state.game_over:
             price = current['收盘价']
             total = calculate_total_asset(price)
             profit = total - 100000
@@ -152,6 +213,23 @@ def main():
             if st.session_state.holdings:
                 st.info(f"买入价: ¥{st.session_state.buy_price:.2f}")
             st.info(f"📅 第 {st.session_state.step + 1}/{len(df)} 个月")
+        elif st.session_state.game_over:
+            # 结算后显示最终结果
+            final_price = df.iloc[-1]['收盘价'] if not st.session_state.early_settle else current[
+                '收盘价'] if current is not None else df.iloc[-1]['收盘价']
+            final_asset = calculate_total_asset(
+                final_price) if not st.session_state.game_over else st.session_state.cash
+            if st.session_state.early_settle:
+                final_asset = st.session_state.cash
+            profit = final_asset - 100000
+            rate = (profit / 100000) * 100
+            st.metric("💰 最终资产", f"¥{final_asset:,.2f}")
+            st.metric("📈 最终盈亏", f"¥{profit:,.2f}", delta=f"{rate:.2f}%")
+            if st.session_state.early_settle:
+                st.info(f"⏰ 提前结算于第 {st.session_state.step} 个月")
+            else:
+                st.info("🏁 走完全程")
+
         st.markdown("---")
         if st.button("🔄 重新开始", use_container_width=True):
             reset_game()
@@ -161,10 +239,8 @@ def main():
     with col1:
         fig = go.Figure()
 
-        # ========== 关键修改：只显示已走过的历史数据 ==========
-        # 显示已走过的所有数据（包括当前月）
         if st.session_state.step >= 0:
-            hist = df.iloc[:st.session_state.step + 1]  # 包含当前月
+            hist = df.iloc[:st.session_state.step + 1]
             fig.add_trace(go.Scatter(
                 x=hist['交易时间'],
                 y=hist['收盘价'],
@@ -174,8 +250,7 @@ def main():
                 marker=dict(size=8, color='#1f77b4')
             ))
 
-        # 当前位置高亮（红色星星）
-        if current is not None:
+        if current is not None and not st.session_state.game_over:
             fig.add_trace(go.Scatter(
                 x=[current['交易时间']],
                 y=[current['收盘价']],
@@ -184,7 +259,15 @@ def main():
                 marker=dict(size=20, color='red', symbol='star')
             ))
 
-        # ❌ 删掉了未来走势的虚线！玩家完全不知道未来
+        # 如果提前结算，标记结算点
+        if st.session_state.game_over and st.session_state.early_settle and current is not None:
+            fig.add_trace(go.Scatter(
+                x=[current['交易时间']],
+                y=[current['收盘价']],
+                mode='markers',
+                name='💼 结算点',
+                marker=dict(size=22, color='gold', symbol='diamond')
+            ))
 
         fig.update_layout(
             title='上证指数月线走势',
@@ -193,39 +276,48 @@ def main():
             height=420,
             hovermode='x',
             legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
-            xaxis=dict(
-                range=[df['交易时间'].min(), df['交易时间'].max()]  # 固定x轴范围，让图表不随步数变化
-            )
+            xaxis=dict(range=[df['交易时间'].min(), df['交易时间'].max()])
         )
         st.plotly_chart(fig, use_container_width=True)
-
-        # 显示当前进度文字
-        st.caption(
-            f"已走过 {st.session_state.step + 1}/{len(df)} 个月，剩余 {len(df) - st.session_state.step - 1} 个月未知")
+        if not st.session_state.game_over:
+            st.caption(
+                f"已走过 {st.session_state.step + 1}/{len(df)} 个月，剩余 {len(df) - st.session_state.step - 1} 个月未知")
+        else:
+            if st.session_state.early_settle:
+                st.caption(f"💼 提前结算于第 {st.session_state.step} 个月")
+            else:
+                st.caption("🏁 走完全程！")
 
     with col2:
         st.subheader("🎯 操作区")
+
         if st.session_state.game_over:
             st.success("🏁 游戏已结束！")
-            final_price = df.iloc[-1]['收盘价']
-            final_asset = calculate_total_asset(final_price)
+            final_price = df.iloc[-1]['收盘价'] if not st.session_state.early_settle else current[
+                '收盘价'] if current is not None else df.iloc[-1]['收盘价']
+            final_asset = st.session_state.cash if st.session_state.early_settle else calculate_total_asset(final_price)
             final_profit = final_asset - 100000
             final_rate = (final_profit / 100000) * 100
+
             st.metric("最终资产", f"¥{final_asset:,.2f}")
             st.metric("总盈亏", f"¥{final_profit:,.2f}", delta=f"{final_rate:.2f}%")
-            if final_rate > 50:
-                st.success("🏆 你也就是运气好，赶上了风口罢了")
-            elif final_rate > 20:
-                st.success("🌟 优秀！投资眼光可以和巴菲特媲美了")
-            elif final_rate > 0:
-                st.info("👍 不是哥们，这和没赚有啥区别？！")
-            elif final_rate > -20:
-                st.warning("😅 亏麻了吧，谁让你不止损的哈哈哈")
+
+            st.markdown("---")
+            comment = get_final_comment(final_rate)
+            if final_rate > 0:
+                st.success(f"{comment}")
             else:
-                st.error("💀 完蛋了吧，都是你的血汗钱啊，你怎么和家人交代！")
+                st.warning(f"{comment}")
+
+            if st.session_state.early_settle:
+                st.info(f"⏰ 你在第 {st.session_state.step} 个月选择提前结算，落袋为安！")
+            else:
+                st.info("📊 你走完了全部29个月！")
+
             if st.session_state.show_balloons:
                 st.balloons()
                 st.session_state.show_balloons = False
+
         elif current is not None:
             st.write(f"**{current['交易时间'].strftime('%Y年%m月')}**")
             st.write(f"收盘价: **{current['收盘价']:.2f}**")
@@ -233,6 +325,8 @@ def main():
             color = "green" if change >= 0 else "red"
             st.write(f"涨跌幅: **<span style='color:{color}'>{change:.2f}%</span>**", unsafe_allow_html=True)
             st.markdown("---")
+
+            # 操作按钮
             if st.session_state.holdings:
                 st.info("📦 当前持有股票")
                 c1, c2 = st.columns(2)
@@ -246,9 +340,22 @@ def main():
                         st.rerun()
             else:
                 st.info("💵 当前空仓")
-                if st.button("📈 买入建仓", use_container_width=True):
-                    handle_action("买入", df)
-                    st.rerun()
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("📈 买入建仓", use_container_width=True):
+                        handle_action("买入", df)
+                        st.rerun()
+                with c2:
+                    if st.button("⏸️ 继续空仓", use_container_width=True):
+                        handle_action("空仓观望", df)
+                        st.rerun()
+
+            st.markdown("---")
+            # 提前结算按钮（危险操作）
+            if st.button("💼 提前结算（落袋为安）", use_container_width=True, type="secondary"):
+                early_settle(df)
+                st.rerun()
+            st.caption("⚠️ 点击后将按当前价格清仓并结束游戏")
 
     st.markdown("---")
     st.subheader("📝 交易记录与评价")
@@ -259,8 +366,12 @@ def main():
                 st.info(f"📅 {r['月份']} | 操作: {op} | 涨跌: {r['涨跌幅']:.2f}% | {r['评价']}")
             elif op == "卖出":
                 st.warning(f"📅 {r['月份']} | 操作: {op} | 涨跌: {r['涨跌幅']:.2f}% | {r['评价']}")
-            else:
+            elif op == "买入":
                 st.success(f"📅 {r['月份']} | 操作: {op} | 涨跌: {r['涨跌幅']:.2f}% | {r['评价']}")
+            elif op == "空仓观望":
+                st.info(f"📅 {r['月份']} | 操作: {op} | 涨跌: {r['涨跌幅']:.2f}% | {r['评价']}")
+            else:  # 提前结算
+                st.success(f"📅 {r['月份']} | {op} | {r['评价']}")
     else:
         st.info("还没有交易记录，开始你的投资之旅吧！")
 
